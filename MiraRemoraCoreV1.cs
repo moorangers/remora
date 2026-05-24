@@ -8,6 +8,7 @@ using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using cAlgo.API;
+using cAlgo.API.Internals;
 using cAlgo.API.Indicators;
 
 namespace cAlgo.Robots
@@ -15,7 +16,7 @@ namespace cAlgo.Robots
     [Robot(AccessRights = AccessRights.FullAccess)]
     public class MiraRemoraCore : Robot
     {
-        [Parameter("Webhook URL", DefaultValue = "https://remora-henna-chi.vercel.app/api/ingest/ctrader")]
+        [Parameter("Webhook URL", DefaultValue = "http://localhost:3000/api/ingest/ctrader")]
         public string WebhookUrl { get; set; }
 
         [Parameter("Strategy Name", DefaultValue = "Mira Remora Core")]
@@ -113,7 +114,7 @@ namespace cAlgo.Robots
             }
         }
 
-        private void OnPositionClosed(PositionClosedEventArgs args)
+        private async void OnPositionClosed(PositionClosedEventArgs args)
         {
             var position = args.Position;
 
@@ -142,15 +143,18 @@ namespace cAlgo.Robots
                 atr_at_open = state.AtrAtOpen
             });
 
-            _ = PublishPositionAsync(
-                position,
-                TradeStage.Close,
-                cancellationToken: _shutdownCts.Token)
-                .ContinueWith(_ =>
-                {
-                    PositionAnalyticsState removedState;
-                    _positionStates.TryRemove(position.Id, out removedState);
-                });
+            try
+            {
+                await PublishPositionAsync(
+                    position,
+                    TradeStage.Close,
+                    cancellationToken: _shutdownCts.Token);
+            }
+            finally
+            {
+                PositionAnalyticsState removedState;
+                _positionStates.TryRemove(position.Id, out removedState);
+            }
         }
 
         private async Task PublishPositionAsync(
