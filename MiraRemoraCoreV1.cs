@@ -31,47 +31,57 @@ namespace cAlgo.Robots
 
         private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
         {
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+            DefaultIgnoreCondition = JsonIgnoreCondition.Never
         };
 
-        private readonly ConcurrentDictionary<int, double> _maeTracker = new ConcurrentDictionary<int, double>();
-        private readonly ConcurrentDictionary<int, double> _mfeTracker = new ConcurrentDictionary<int, double>();
+        private readonly ConcurrentDictionary<int, PositionAnalyticsState> _positionStates =
+            new ConcurrentDictionary<int, PositionAnalyticsState>();
+
         private CancellationTokenSource _shutdownCts;
         private AverageTrueRange _atr;
 
         protected override void OnStart()
         {
             _shutdownCts = new CancellationTokenSource();
-
             _atr = Indicators.AverageTrueRange(14, MovingAverageType.Exponential);
 
             Client.DefaultRequestHeaders.Accept.Clear();
             Client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-            LogInfo("bot_started", null, new
+            Positions.Opened += OnPositionOpened;
+            Positions.Closed += OnPositionClosed;
+
+            LogInfo(LogEvent.BotStarted, null, new
             {
                 webhook_url = WebhookUrl,
                 strategy_name = StrategyName,
-                strategy_version = StrategyVersion
+                strategy_version = StrategyVersion,
+                atr_period = 14,
+                atr_ma_type = "EMA"
             });
-
-            Positions.Opened += OnPositionsOpened;
-            Positions.Closed += OnPositionsClosed;
         }
 
-        private void OnPositionsOpened(PositionOpenedEventArgs args)
+        private void OnPositionOpened(PositionOpenedEventArgs args)
         {
             var position = args.Position;
-            _maeTracker[position.Id] = 0d;
-            _mfeTracker[position.Id] = 0d;
+            var atrAtOpen = GetAtrValue();
 
-            LogInfo("position_opened", position, new { stage = TradeStage.Open });
+            _positionStates[position.Id] = new PositionAnalyticsState
+            {
+                MaePips = 0d,
+                MfePips = 0d,
+                AtrAtOpen = atrAtOpen
+            };
+
+            LogInfo(LogEvent.PositionOpened, position, new
+            {
+                stage = TradeStage.Open,
+                atr_at_open = atrAtOpen
+            });
 
             _ = PublishPositionAsync(
                 position,
                 TradeStage.Open,
-                maePips: 0d,
-                mfePips: 0d,
                 cancellationToken: _shutdownCts.Token);
         }
 
@@ -79,108 +89,148 @@ namespace cAlgo.Robots
         {
             foreach (var position in Positions)
             {
-                if (!_maeTracker.ContainsKey(position.Id))
+                if (!_positionStates.ContainsKey(position.Id))
                 {
                     continue;
                 }
 
-                var pipsPnL = position.Pips;
+                var currentPips = position.Pips;
 
-                _mfeTracker.AddOrUpdate(
+                _positionStates.AddOrUpdate(
                     position.Id,
-                    pipsPnL,
-                    (_, current) => pipsPnL > current ? pipsPnL : current);
-
-                _maeTracker.AddOrUpdate(
-                    position.Id,
-                    pipsPnL,
-                    (_, current) => pipsPnL < current ? pipsPnL : current);
+                    _ => new PositionAnalyticsState
+                    {
+                        MaePips = Math.Min(0d, currentPips),
+                        MfePips = Math.Max(0d, currentPips),
+                        AtrAtOpen = GetAtrValue()
+                    },
+                    (_, state) =>
+                    {
+                        state.MaePips = Math.Min(state.MaePips, currentPips);
+                        state.MfePips = Math.Max(state.MfePips, currentPips);
+                        return state;
+                    });
             }
         }
 
-        private void OnPositionsClosed(PositionClosedEventArgs args)
+        private void OnPositionClosed(PositionClosedEventArgs args)
         {
             var position = args.Position;
-            _maeTracker.TryGetValue(position.Id, out var trackedMae);
-            _mfeTracker.TryGetValue(position.Id, out var trackedMfe);
 
-            var finalMae = Math.Abs(trackedMae);
-            var finalMfe = trackedMfe;
+            if (!_positionStates.ContainsKey(position.Id))
+            {
+                _positionStates[position.Id] = new PositionAnalyticsState
+                {
+                    MaePips = Math.Min(0d, position.Pips),
+                    MfePips = Math.Max(0d, position.Pips),
+                    AtrAtOpen = GetAtrValue()
+                };
 
-            LogInfo("position_closed", position, new
+                LogWarn(LogEvent.PositionClosed, position, new
+                {
+                    warning = "analytics_state_missing_recreated_from_closed_position"
+                });
+            }
+
+            var state = _positionStates[position.Id];
+
+            LogInfo(LogEvent.PositionClosed, position, new
             {
                 stage = TradeStage.Close,
-                mae_pips = finalMae,
-                mfe_pips = finalMfe
+                mae_pips = Math.Abs(state.MaePips),
+                mfe_pips = state.MfePips,
+                atr_at_open = state.AtrAtOpen
             });
 
             _ = PublishPositionAsync(
                 position,
                 TradeStage.Close,
-                maePips: finalMae,
-                mfePips: finalMfe,
-                cancellationToken: _shutdownCts.Token);
-
-            _maeTracker.TryRemove(position.Id, out _);
-            _mfeTracker.TryRemove(position.Id, out _);
+                cancellationToken: _shutdownCts.Token)
+                .ContinueWith(_ =>
+                {
+                    PositionAnalyticsState removedState;
+                    _positionStates.TryRemove(position.Id, out removedState);
+                });
         }
 
         private async Task PublishPositionAsync(
             Position position,
             TradeStage stage,
-            double maePips,
-            double mfePips,
             CancellationToken cancellationToken)
         {
             try
             {
-                Print($"[REMORA] SL={position.StopLoss}");
-                Print($"[REMORA] TP={position.TakeProfit}");
-
-                var payload = BuildPayload(position, stage, maePips, mfePips);
+                var payload = BuildPayload(position, stage);
                 var json = JsonSerializer.Serialize(payload, JsonOptions);
 
-                Print("=== REMORA PAYLOAD ===");
-                Print(json);
+                LogInfo(LogEvent.PayloadCreated, position, new
+                {
+                    stage,
+                    payload = payload
+                });
+
+                LogInfo(LogEvent.WebhookSent, position, new
+                {
+                    stage,
+                    webhook_url = WebhookUrl
+                });
 
                 using (var content = new StringContent(json, Encoding.UTF8, "application/json"))
                 using (var response = await Client.PostAsync(WebhookUrl, content, cancellationToken).ConfigureAwait(false))
                 {
+                    var responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+
                     if (!response.IsSuccessStatusCode)
                     {
-                        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                        LogWarn("publish_failed", position, new
+                        LogWarn(LogEvent.WebhookFailed, position, new
                         {
                             stage,
                             status_code = (int)response.StatusCode,
-                            response_body = body
+                            response_body = responseBody
                         });
                         return;
                     }
-                }
 
-                LogInfo("publish_success", position, new { stage });
+                    LogInfo(LogEvent.WebhookSuccess, position, new
+                    {
+                        stage,
+                        status_code = (int)response.StatusCode,
+                        response_body = responseBody
+                    });
+                }
             }
             catch (OperationCanceledException)
             {
-                LogInfo("publish_cancelled", position, new { stage });
+                LogWarn(LogEvent.WebhookFailed, position, new
+                {
+                    stage,
+                    reason = "operation_cancelled"
+                });
             }
             catch (Exception ex)
             {
-                LogError("publish_exception", position, ex, new { stage });
+                LogError(LogEvent.WebhookFailed, position, ex, new
+                {
+                    stage
+                });
             }
         }
 
-        private RemoraPayload BuildPayload(Position position, TradeStage stage, double maePips, double mfePips)
+        private RemoraPayload BuildPayload(Position position, TradeStage stage)
         {
             var nowUtc = Server.Time.ToUniversalTime();
             var openedAt = position.EntryTime.ToUniversalTime();
-            DateTime? closedAt = stage == TradeStage.Close ? nowUtc : (DateTime?)null;
-            var spread = position.SymbolName == SymbolName ? Symbol.Spread / Symbol.PipSize : 0d;
             var symbol = Symbols.GetSymbol(position.SymbolName);
-            var pipSize = symbol != null ? symbol.PipSize : 0d;
-            double? exitPrice = null;
+            var pipSize = symbol != null ? symbol.PipSize : Symbol.PipSize;
 
+            PositionAnalyticsState state;
+            _positionStates.TryGetValue(position.Id, out state);
+
+            var maePips = state != null ? Math.Abs(state.MaePips) : 0d;
+            var mfePips = state != null ? state.MfePips : 0d;
+            var atrAtOpen = state != null ? state.AtrAtOpen : GetAtrValue();
+
+            double? exitPrice = null;
             if (stage == TradeStage.Close && pipSize > 0d)
             {
                 var signedDelta = position.Pips * pipSize;
@@ -189,19 +239,10 @@ namespace cAlgo.Robots
                     : position.EntryPrice - signedDelta;
             }
 
-            double? riskPips = null;
-            double? rewardPips = null;
+            var spreadPips = GetSpreadPips(position.SymbolName, symbol);
+            var riskPips = CalculateRiskPips(position, pipSize);
+            var rewardPips = CalculateRewardPips(position, pipSize);
             double? rrRatio = null;
-
-            if (position.StopLoss.HasValue && pipSize > 0d)
-            {
-                riskPips = Math.Abs(position.EntryPrice - position.StopLoss.Value) / pipSize;
-            }
-
-            if (position.TakeProfit.HasValue && pipSize > 0d)
-            {
-                rewardPips = Math.Abs(position.TakeProfit.Value - position.EntryPrice) / pipSize;
-            }
 
             if (riskPips.HasValue && rewardPips.HasValue && riskPips.Value > 0d)
             {
@@ -227,16 +268,16 @@ namespace cAlgo.Robots
                 NetProfit = position.NetProfit,
                 Commission = position.Commissions,
                 SwapFee = position.Swap,
-                Spread = spread,
-                Atr = _atr != null ? _atr.Result.LastValue : (double?)null,
+                Spread = spreadPips,
+                Atr = atrAtOpen,
                 RiskPips = riskPips,
                 RewardPips = rewardPips,
                 RRRatio = rrRatio,
                 MaePips = maePips,
                 MfePips = mfePips,
                 OpenedAt = openedAt,
-                ClosedAt = closedAt,
-                Result = stage == TradeStage.Close ? (position.NetProfit >= 0 ? "win" : "loss") : "open",
+                ClosedAt = stage == TradeStage.Close ? nowUtc : (DateTime?)null,
+                Result = stage == TradeStage.Close ? (position.NetProfit >= 0d ? "win" : "loss") : "open",
                 Metadata = new PayloadMetadata
                 {
                     PositionLabel = position.Label,
@@ -245,9 +286,71 @@ namespace cAlgo.Robots
             };
         }
 
+        private double? CalculateRiskPips(Position position, double pipSize)
+        {
+            if (!position.StopLoss.HasValue || pipSize <= 0d)
+            {
+                return null;
+            }
+
+            return Math.Abs(position.EntryPrice - position.StopLoss.Value) / pipSize;
+        }
+
+        private double? CalculateRewardPips(Position position, double pipSize)
+        {
+            if (!position.TakeProfit.HasValue || pipSize <= 0d)
+            {
+                return null;
+            }
+
+            return Math.Abs(position.TakeProfit.Value - position.EntryPrice) / pipSize;
+        }
+
+        private double GetSpreadPips(string positionSymbolName, Symbol positionSymbol)
+        {
+            if (positionSymbolName == SymbolName)
+            {
+                return Symbol.Spread / Symbol.PipSize;
+            }
+
+            if (positionSymbol != null && positionSymbol.PipSize > 0d)
+            {
+                return positionSymbol.Spread / positionSymbol.PipSize;
+            }
+
+            return 0d;
+        }
+
+        private double? GetAtrValue()
+        {
+            if (_atr == null)
+            {
+                LogWarn(LogEvent.PayloadCreated, null, new
+                {
+                    warning = "atr_indicator_not_initialized"
+                });
+                return null;
+            }
+
+            var value = _atr.Result.LastValue;
+
+            if (double.IsNaN(value) || double.IsInfinity(value) || value <= 0d)
+            {
+                LogWarn(LogEvent.PayloadCreated, null, new
+                {
+                    warning = "atr_value_invalid_or_not_ready",
+                    atr_value = value
+                });
+                return null;
+            }
+
+            return value;
+        }
+
         private static string CalculateSessionName(DateTime utcNow)
         {
             var hour = utcNow.Hour;
+
             if (hour >= 0 && hour < 8)
             {
                 return "ASIA";
@@ -261,29 +364,29 @@ namespace cAlgo.Robots
             return "NEW_YORK";
         }
 
-        private void LogInfo(string eventName, Position position, object context)
+        private void LogInfo(LogEvent eventName, Position position, object context)
         {
             Log("INFO", eventName, position, null, context);
         }
 
-        private void LogWarn(string eventName, Position position, object context)
+        private void LogWarn(LogEvent eventName, Position position, object context)
         {
             Log("WARN", eventName, position, null, context);
         }
 
-        private void LogError(string eventName, Position position, Exception exception, object context)
+        private void LogError(LogEvent eventName, Position position, Exception exception, object context)
         {
             Log("ERROR", eventName, position, exception, context);
         }
 
-        private void Log(string level, string eventName, Position position, Exception exception, object context)
+        private void Log(string level, LogEvent eventName, Position position, Exception exception, object context)
         {
             var log = new
             {
                 ts = DateTime.UtcNow.ToString("O"),
                 level,
-                event_name = eventName,
-                position_id = position != null ? position.Id : (int?)null,
+                @event = eventName.ToString(),
+                ticket_id = position != null ? position.Id.ToString() : null,
                 symbol = position != null ? position.SymbolName : null,
                 context,
                 error = exception == null
@@ -300,8 +403,8 @@ namespace cAlgo.Robots
 
         protected override void OnStop()
         {
-            Positions.Opened -= OnPositionsOpened;
-            Positions.Closed -= OnPositionsClosed;
+            Positions.Opened -= OnPositionOpened;
+            Positions.Closed -= OnPositionClosed;
 
             if (_shutdownCts != null)
             {
@@ -310,13 +413,34 @@ namespace cAlgo.Robots
                 _shutdownCts = null;
             }
 
-            LogInfo("bot_stopped", null, null);
+            _positionStates.Clear();
+
+            LogInfo(LogEvent.BotStopped, null, null);
         }
 
         private enum TradeStage
         {
             Open,
             Close
+        }
+
+        private enum LogEvent
+        {
+            BotStarted,
+            BotStopped,
+            PositionOpened,
+            PositionClosed,
+            PayloadCreated,
+            WebhookSent,
+            WebhookSuccess,
+            WebhookFailed
+        }
+
+        private sealed class PositionAnalyticsState
+        {
+            public double MaePips { get; set; }
+            public double MfePips { get; set; }
+            public double? AtrAtOpen { get; set; }
         }
 
         private sealed class RemoraPayload
