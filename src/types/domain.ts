@@ -1,10 +1,10 @@
-export type SourcePlatform = "ctrader" | "mt5" | "binance" | "bybit" | "custom";
+export type SourcePlatform = 'ctrader' | 'mt5' | 'binance' | 'bybit' | 'custom';
 
-export type TradeSide = "buy" | "sell";
+export type TradeSide = 'buy' | 'sell';
 
-export type TradeStage = "OPEN" | "CLOSE";
+export type TradeStage = 'OPEN' | 'CLOSE';
 
-export type TradeResult = "win" | "loss" | "breakeven" | "open";
+export type TradeResult = 'win' | 'loss' | 'breakeven' | 'open';
 
 export interface TradeRecord {
   id: string;
@@ -25,11 +25,15 @@ export interface TradeRecord {
   swapFee: number | null;
   spread: number | null;
   atr: number | null;
+  riskPips?: number | null;
+  rewardPips?: number | null;
+  rrRatio?: number | null;
   maePips: number | null;
   mfePips: number | null;
   openedAt: string;
   closedAt: string | null;
   result: TradeResult;
+  metadata?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }
@@ -75,6 +79,9 @@ export interface NormalizedTradePayload {
   swapFee: number | null;
   spread: number | null;
   atr: number | null;
+  riskPips?: number | null;
+  rewardPips?: number | null;
+  rrRatio?: number | null;
   maePips: number | null;
   mfePips: number | null;
   openedAt: string;

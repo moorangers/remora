@@ -1,0 +1,18 @@
+เป็นไปได้ครับ และคุณคิดถูกแล้วว่าไม่ควรคำนวณ ExitPrice จาก EntryPrice ± Pips อย่างเดียวถ้าต้องการราคา execution จริงตอนปิด
+
+สรุปจาก API:
+
+PositionClosedEventArgs มีแค่ Position กับ Reason ไม่มีฟิลด์ close price ตรง ๆ
+Position มี Deals และ Deal มี ExecutionPrice
+HistoricalTrade มี ClosingPrice (ระบุว่าเป็น execution price ของ closing deal)
+ดังนั้นแหล่งข้อมูลที่แม่นสุดคือ:
+
+ใช้ HistoricalTrade.ClosingPrice โดยหา record ล่าสุดของ PositionId นั้น
+fallback เป็น closing Deal.ExecutionPrice จาก position.Deals
+fallback สุดท้ายค่อยใช้สูตรจาก Pips (กันกรณีหาไม่ได้จริง)
+ข้อควรรู้:
+
+ถ้ามี partial close จะมี HistoricalTrade หลายรายการต่อ position เดียว
+ถ้าต้องการ ExitPrice เดียวตอนปิดทั้งก้อน ให้เลือกรายการที่ ClosingTime ล่าสุด หรือคำนวณ VWAP จาก closing deals ตาม Volume
+วิธีนี้จะสะท้อน slippage จริงได้ดีกว่าสูตรคำนวณ
+ถ้าคุณโอเค ผมจะลงมือแก้ให้เลยโดยทำ helper ดึงราคาปิดแบบ 3-step fallback และแทนที่จุดที่ตั้ง ExitPrice ปัจจุบันให้ทันที.
