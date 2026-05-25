@@ -62,6 +62,7 @@ function createRepository(
   overrides: Partial<TradeRepository> = {},
 ): TradeRepository {
   return {
+    findById: vi.fn().mockResolvedValue(null),
     findByTradeId: vi.fn().mockResolvedValue(null),
     findLatestTrades: vi.fn().mockResolvedValue([]),
     findByDateRange: vi.fn().mockResolvedValue([]),

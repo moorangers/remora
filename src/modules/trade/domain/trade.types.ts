@@ -22,6 +22,7 @@ export interface TradeRecord {
   stage: TradeStage;
   strategyName: string;
   strategyVersion: string | null;
+  sessionName: string | null;
   symbol: string;
   side: TradeSide;
   entryPrice: number;
@@ -35,6 +36,9 @@ export interface TradeRecord {
   swapFee: number | null;
   spread: number | null;
   atr: number | null;
+  riskPips: number | null;
+  rewardPips: number | null;
+  rrRatio: number | null;
   maePips: number | null;
   mfePips: number | null;
   openedAt: string;

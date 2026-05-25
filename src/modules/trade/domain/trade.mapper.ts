@@ -37,11 +37,12 @@ export function mapCTraderPayloadToTradeRecord(payload: unknown): TradeRecord {
   const parsed = cTraderRawPayloadSchema.parse(payload);
 
   const normalized: TradeRecord = {
-    sourcePlatform: 'ctrader',
+    sourcePlatform: parsed.source_platform,
     sourceTradeId: parsed.ticket_id,
     stage: parsed.stage,
     strategyName: parsed.strategy_name,
     strategyVersion: parsed.strategy_version ?? null,
+    sessionName: parsed.session_name ?? null,
     symbol: parsed.symbol,
     side: mapActionToSide(parsed.action),
     entryPrice: parsed.entry_price,
@@ -55,6 +56,9 @@ export function mapCTraderPayloadToTradeRecord(payload: unknown): TradeRecord {
     swapFee: parsed.swap_fee,
     spread: parsed.spread,
     atr: parsed.atr,
+    riskPips: parsed.risk_pips,
+    rewardPips: parsed.reward_pips,
+    rrRatio: parsed.rr_ratio,
     maePips: parsed.mae_pips,
     mfePips: parsed.mfe_pips,
     openedAt: parsed.opened_at,

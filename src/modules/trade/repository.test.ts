@@ -9,28 +9,28 @@ type QueryResult<T> =
 
 type QueryBuilderState<T> = {
   result: QueryResult<T>;
+  data: T | null;
+  error: { code?: string; message: string } | null;
   eq: ReturnType<typeof vi.fn>;
   gte: ReturnType<typeof vi.fn>;
   lte: ReturnType<typeof vi.fn>;
   order: ReturnType<typeof vi.fn>;
   limit: ReturnType<typeof vi.fn>;
   maybeSingle: ReturnType<typeof vi.fn>;
-  then: ReturnType<typeof vi.fn>;
 };
 
 function createChainableQuery<T>(result: QueryResult<T>): QueryBuilderState<T> {
   const state = {} as QueryBuilderState<T>;
 
   state.result = result;
+  state.data = result.data;
+  state.error = result.error;
   state.eq = vi.fn(() => state);
   state.gte = vi.fn(() => state);
   state.lte = vi.fn(() => state);
   state.order = vi.fn(() => state);
   state.limit = vi.fn(() => state);
   state.maybeSingle = vi.fn(async () => result);
-  state.then = vi.fn((resolve: (value: QueryResult<T>) => unknown) =>
-    resolve(result),
-  );
 
   return state;
 }
@@ -71,6 +71,7 @@ const sampleRow = {
   source_trade_id: '12345',
   strategy_name: 'London Breakout',
   strategy_version: '1.0.0',
+  session_name: null,
   symbol: 'EURUSD',
   side: 'buy',
   entry_price: 1.085,
@@ -98,6 +99,19 @@ const sampleRow = {
 } as const;
 
 describe('SupabaseTradeRepository', () => {
+  it('findById returns matching trade', async () => {
+    const query = createChainableQuery({ data: sampleRow, error: null });
+    const select = vi.fn(() => query);
+    const from = vi.fn(() => ({ select }));
+    const supabase = { from } as unknown as SupabaseClient;
+
+    const repository = new SupabaseTradeRepository(supabase);
+    const found = await repository.findById(sampleRow.id);
+
+    expect(query.eq).toHaveBeenCalledWith('id', sampleRow.id);
+    expect(found?.id).toBe(sampleRow.id);
+  });
+
   it('createTrade inserts and returns normalized trade', async () => {
     const single = vi.fn(async () => ({ data: sampleRow, error: null }));
     const selectAfterInsert = vi.fn(() => ({ single }));

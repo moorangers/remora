@@ -11,6 +11,7 @@ export type TradeRecordRow = {
   source_trade_id: string;
   strategy_name: string;
   strategy_version: string | null;
+  session_name: string | null;
   symbol: string;
   side: 'buy' | 'sell';
   entry_price: number;
@@ -43,6 +44,7 @@ export const TRADE_RECORD_SELECT = [
   'source_trade_id',
   'strategy_name',
   'strategy_version',
+  'session_name',
   'symbol',
   'side',
   'entry_price',
@@ -76,6 +78,7 @@ export function toTradeRecord(row: TradeRecordRow): TradeRecord {
     sourceTradeId: row.source_trade_id,
     strategyName: row.strategy_name,
     strategyVersion: row.strategy_version,
+    sessionName: row.session_name,
     symbol: row.symbol,
     side: row.side,
     entryPrice: row.entry_price,
@@ -111,6 +114,7 @@ export function toCreateRow(
     source_trade_id: payload.sourceTradeId,
     strategy_name: payload.strategyName,
     strategy_version: payload.strategyVersion,
+    session_name: payload.sessionName ?? null,
     symbol: payload.symbol,
     side: payload.side,
     entry_price: payload.entryPrice,
@@ -145,6 +149,7 @@ export function toCloseUpdateRow(
     take_profit: payload.takeProfit,
     gross_profit: payload.grossProfit,
     net_profit: payload.netProfit,
+    session_name: payload.sessionName ?? null,
     commission: payload.commission,
     swap_fee: payload.swapFee,
     spread: payload.spread,

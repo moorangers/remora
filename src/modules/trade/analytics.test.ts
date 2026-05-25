@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TradeRecord, TradeResult } from '@/types';
+import type { TradeRecord } from '@/types';
 import {
   calculateAverageLoss,
   calculateAverageMAE,
@@ -14,7 +14,7 @@ import {
 } from './analytics';
 
 function createTrade(overrides: Partial<TradeRecord>): TradeRecord {
-  const result = (overrides.result ?? 'breakeven') as TradeResult;
+  const result = overrides.result ?? 'breakeven';
 
   return {
     id: overrides.id ?? crypto.randomUUID(),

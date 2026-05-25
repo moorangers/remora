@@ -12,6 +12,7 @@ export interface TradeRecord {
   sourceTradeId: string;
   strategyName: string;
   strategyVersion: string | null;
+  sessionName?: string | null;
   symbol: string;
   side: TradeSide;
   entryPrice: number;
@@ -66,6 +67,7 @@ export interface NormalizedTradePayload {
   stage: TradeStage;
   strategyName: string;
   strategyVersion: string | null;
+  sessionName?: string | null;
   symbol: string;
   side: TradeSide;
   entryPrice: number;

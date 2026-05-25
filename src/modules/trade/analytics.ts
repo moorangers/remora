@@ -86,12 +86,13 @@ function buildPerformanceSummary(
     closedTrades.length === 0
       ? 0
       : round((wins.length / closedTrades.length) * 100);
-  const profitFactor =
-    grossLossAbs === 0
-      ? grossProfit > 0
-        ? Number.POSITIVE_INFINITY
-        : 0
-      : round(grossProfit / grossLossAbs);
+  let profitFactor = 0;
+
+  if (grossLossAbs === 0) {
+    profitFactor = grossProfit > 0 ? Number.POSITIVE_INFINITY : 0;
+  } else {
+    profitFactor = round(grossProfit / grossLossAbs);
+  }
 
   return {
     tradeCount: closedTrades.length,
@@ -115,9 +116,19 @@ function buildPerformanceSummary(
 }
 
 function defaultSessionResolver(trade: TradeRecord): string {
-  const value = trade.metadata?.sessionName;
-  if (typeof value === 'string' && value.trim().length > 0) {
-    return value.trim().toLowerCase();
+  if (
+    typeof trade.sessionName === 'string' &&
+    trade.sessionName.trim().length > 0
+  ) {
+    return trade.sessionName.trim().toLowerCase();
+  }
+
+  const metadataSessionName = trade.metadata?.sessionName;
+  if (
+    typeof metadataSessionName === 'string' &&
+    metadataSessionName.trim().length > 0
+  ) {
+    return metadataSessionName.trim().toLowerCase();
   }
 
   return 'unknown';

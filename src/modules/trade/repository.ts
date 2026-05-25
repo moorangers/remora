@@ -16,6 +16,7 @@ import {
 } from './trade.mapper';
 
 export interface TradeRepository {
+  findById(id: string): Promise<TradeRecord | null>;
   findByTradeId(
     sourcePlatform: SourcePlatform,
     sourceTradeId: string,
@@ -50,6 +51,20 @@ export class SupabaseTradeRepository implements TradeRepository {
   constructor(
     private readonly supabase: SupabaseClient = getSupabaseClient(),
   ) {}
+
+  async findById(id: string): Promise<TradeRecord | null> {
+    const { data, error } = await this.supabase
+      .from('trade_records')
+      .select(TRADE_RECORD_SELECT)
+      .eq('id', id)
+      .maybeSingle<TradeRecordRow>();
+
+    if (error) {
+      throw toRepositoryError('find trade by id', error);
+    }
+
+    return data ? toTradeRecord(data) : null;
+  }
 
   async findByTradeId(
     sourcePlatform: SourcePlatform,

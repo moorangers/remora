@@ -73,6 +73,12 @@ export const tradeResultSchema = z.enum(TRADE_RESULTS);
 export const tradeSideSchema = z.enum(TRADE_SIDES);
 
 export const cTraderRawPayloadSchema = z.object({
+  source_platform: z
+    .string()
+    .transform((value) => value.toLowerCase())
+    .pipe(z.enum(['ctrader', 'mt5', 'binance', 'bybit', 'custom']))
+    .optional()
+    .default('ctrader'),
   ticket_id: z.union([z.string(), z.number()]).transform(String),
   stage: z
     .string()
@@ -84,6 +90,7 @@ export const cTraderRawPayloadSchema = z.object({
     .pipe(z.enum(['buy', 'sell', 'long', 'short'])),
   strategy_name: z.string().min(1),
   strategy_version: z.string().min(1).nullish(),
+  session_name: z.string().min(1).nullish(),
   symbol: z.string().min(1),
   entry_price: requiredNumberFromUnknown,
   exit_price: numberFromUnknown.optional().default(null),
@@ -96,6 +103,9 @@ export const cTraderRawPayloadSchema = z.object({
   swap_fee: numberFromUnknown.optional().default(null),
   spread: numberFromUnknown.optional().default(null),
   atr: numberFromUnknown.optional().default(null),
+  risk_pips: numberFromUnknown.optional().default(null),
+  reward_pips: numberFromUnknown.optional().default(null),
+  rr_ratio: numberFromUnknown.optional().default(null),
   mae_pips: numberFromUnknown.optional().default(null),
   mfe_pips: numberFromUnknown.optional().default(null),
   opened_at: dateTimeFromUnknown,
@@ -111,6 +121,7 @@ export const tradeRecordSchema: z.ZodType<TradeRecord> = z
     stage: tradeStageSchema,
     strategyName: z.string().min(1),
     strategyVersion: z.string().min(1).nullable(),
+    sessionName: z.string().min(1).nullable(),
     symbol: z.string().min(1),
     side: tradeSideSchema,
     entryPrice: z.number().finite(),
@@ -124,6 +135,9 @@ export const tradeRecordSchema: z.ZodType<TradeRecord> = z
     swapFee: z.number().finite().nullable(),
     spread: z.number().finite().nullable(),
     atr: z.number().finite().nullable(),
+    riskPips: z.number().finite().nullable(),
+    rewardPips: z.number().finite().nullable(),
+    rrRatio: z.number().finite().nullable(),
     maePips: z.number().finite().nullable(),
     mfePips: z.number().finite().nullable(),
     openedAt: z.string().datetime(),
